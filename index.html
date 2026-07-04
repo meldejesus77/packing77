@@ -226,41 +226,35 @@
   .car-tab-inner {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 4px;
   }
-  .car-card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-  }
-  .car-card-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #1e1e1e;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #8a9ab0;
+  .car-heading {
     display: flex;
     align-items: center;
     gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e1e1e;
+    padding: 18px 0 6px;
+    border-bottom: 1px solid #e0ddd8;
+    margin-bottom: 4px;
   }
-  .car-card-title .car-dot {
-    width: 12px; height: 12px;
+  .car-heading:first-child { padding-top: 4px; }
+  .car-heading .car-dot {
+    width: 10px; height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .car-section-title {
-    font-size: 12px;
+  .car-section-heading {
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: #8a9ab0;
-    margin: 12px 0 6px;
+    padding: 10px 0 4px;
   }
-  .car-zone {
-    margin-bottom: 8px;
-  }
+  /* legacy — kept for safety */
+  .car-card { display: none; }
   .car-zone-label {
     font-size: 13px;
     font-weight: 600;
@@ -783,47 +777,116 @@ function buildCarTab(tab) {
   const inner = document.createElement('div');
   inner.className = 'car-tab-inner';
 
-  tab.cars.forEach(car => {
-    const card = document.createElement('div');
-    card.className = 'car-card';
-
-    const cardTitle = document.createElement('div');
-    cardTitle.className = 'car-card-title';
-
+  tab.cars.forEach((car, carIdx) => {
+    const carHeading = document.createElement('div');
+    carHeading.className = 'car-heading';
     const dot = document.createElement('span');
     dot.className = 'car-dot';
     dot.style.background = car.color;
-    cardTitle.appendChild(dot);
-    cardTitle.appendChild(document.createTextNode(car.name));
-    card.appendChild(cardTitle);
+    carHeading.appendChild(dot);
+    carHeading.appendChild(document.createTextNode(car.name));
+    inner.appendChild(carHeading);
 
-    car.sections.forEach(csec => {
-      const secTitle = document.createElement('div');
-      secTitle.className = 'car-section-title';
-      secTitle.textContent = csec.heading;
-      card.appendChild(secTitle);
+    car.sections.forEach((csec, sIdx) => {
+      const secHeading = document.createElement('div');
+      secHeading.className = 'car-section-heading';
+      secHeading.textContent = csec.heading;
+      inner.appendChild(secHeading);
 
-      csec.zones.forEach(zone => {
-        const zDiv = document.createElement('div');
-        zDiv.className = 'car-zone';
+      csec.zones.forEach((zone, zIdx) => {
+        const sKey = `car_${carIdx}_${sIdx}_${zIdx}`;
+        const items = zone.items;
+        const checkedCount = items.filter((_, iIdx) =>
+          localStorage.getItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`) === '1'
+        ).length;
+        const allDone = items.length > 0 && checkedCount === items.length;
+        const isCollapsed = allDone || localStorage.getItem(`${STORAGE_PREFIX}collapse_${sKey}`) === '1';
 
-        const zLabel = document.createElement('div');
-        zLabel.className = 'car-zone-label';
-        zLabel.textContent = zone.label;
-        zDiv.appendChild(zLabel);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'section' + (allDone ? ' all-done' : '') + (isCollapsed ? ' collapsed' : '');
 
+        const header = document.createElement('div');
+        header.className = 'section-header';
+
+        const zoneDot = document.createElement('span');
+        zoneDot.className = 'dot';
+        zoneDot.style.background = car.color;
+
+        const title = document.createElement('span');
+        title.className = 'section-title';
+        title.textContent = zone.label;
+
+        const progress = document.createElement('span');
+        progress.className = 'section-progress';
+        progress.textContent = `${checkedCount} / ${items.length}`;
+
+        const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        chevron.setAttribute('class', 'chevron');
+        chevron.setAttribute('viewBox', '0 0 24 24');
+        chevron.setAttribute('fill', 'none');
+        chevron.setAttribute('stroke', 'currentColor');
+        chevron.setAttribute('stroke-width', '2.5');
+        chevron.setAttribute('stroke-linecap', 'round');
+        chevron.setAttribute('stroke-linejoin', 'round');
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline.setAttribute('points', '6 9 12 15 18 9');
+        chevron.appendChild(polyline);
+
+        header.appendChild(zoneDot);
+        header.appendChild(title);
+        header.appendChild(progress);
+        header.appendChild(chevron);
+
+        header.addEventListener('click', () => {
+          const nowCollapsed = wrapper.classList.toggle('collapsed');
+          if (nowCollapsed) localStorage.setItem(`${STORAGE_PREFIX}collapse_${sKey}`, '1');
+          else localStorage.removeItem(`${STORAGE_PREFIX}collapse_${sKey}`);
+        });
+
+        const body = document.createElement('div');
+        body.className = 'section-body';
         const ul = document.createElement('ul');
-        zone.items.forEach(item => {
+        ul.className = 'item-list';
+
+        items.forEach((item, iIdx) => {
           const li = document.createElement('li');
-          li.textContent = item;
+          const checked = localStorage.getItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`) === '1';
+          if (checked) li.classList.add('checked');
+
+          const id = `car-${carIdx}-${sIdx}-${zIdx}-${iIdx}`;
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.id = id;
+          cb.checked = checked;
+
+          const lbl = document.createElement('label');
+          lbl.htmlFor = id;
+          lbl.textContent = item;
+
+          cb.addEventListener('change', () => {
+            if (cb.checked) localStorage.setItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`, '1');
+            else localStorage.removeItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`);
+            li.classList.toggle('checked', cb.checked);
+            const newCount = items.filter((_, i) =>
+              localStorage.getItem(`${STORAGE_PREFIX}${sKey}_${i}`) === '1'
+            ).length;
+            progress.textContent = `${newCount} / ${items.length}`;
+            const newAllDone = items.length > 0 && newCount === items.length;
+            wrapper.classList.toggle('all-done', newAllDone);
+            if (newAllDone) wrapper.classList.add('collapsed');
+          });
+
+          li.appendChild(cb);
+          li.appendChild(lbl);
           ul.appendChild(li);
         });
-        zDiv.appendChild(ul);
-        card.appendChild(zDiv);
+
+        body.appendChild(ul);
+        wrapper.appendChild(header);
+        wrapper.appendChild(body);
+        inner.appendChild(wrapper);
       });
     });
-
-    inner.appendChild(card);
   });
 
   return inner;
