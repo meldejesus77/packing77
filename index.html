@@ -12,8 +12,6 @@
   :root {
     --bg: #f5f4f0;
     --nav-h: 52px;
-    --tab-h: 46px;
-    --total-offset: calc(var(--nav-h) + var(--tab-h));
   }
 
   body {
@@ -55,51 +53,20 @@
   }
   #reset-btn:hover { background: #555; }
 
-  /* TAB BAR */
-  #tab-bar {
-    position: fixed;
-    top: var(--nav-h);
-    left: 0; right: 0;
-    height: var(--tab-h);
-    background: #1e1e1e;
-    display: flex;
-    overflow-x: auto;
-    overflow-y: hidden;
-    z-index: 99;
-    scrollbar-width: none;
-    border-top: 1px solid #333;
-  }
-  #tab-bar::-webkit-scrollbar { display: none; }
-  .tab-btn {
-    flex: 0 0 auto;
-    background: none;
-    border: none;
-    color: #aaa;
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 0 16px;
-    cursor: pointer;
-    white-space: nowrap;
-    border-bottom: 3px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .tab-btn.active {
-    color: #f0ede8;
-  }
-
   /* CONTENT */
   #content {
-    padding-top: var(--total-offset);
+    padding-top: calc(var(--nav-h) + 8px);
     padding-bottom: 40px;
-  }
-  .tab-panel {
-    display: none;
     max-width: 680px;
     margin: 0 auto;
-    padding: 16px 12px;
   }
-  .tab-panel.active { display: block; }
+
+  /* Hub — full-width within max-width container */
+  #content.hub-view {
+    max-width: 680px;
+    padding-left: 0;
+    padding-right: 0;
+  }
 
   /* SECTION */
   .section {
@@ -302,6 +269,31 @@
     background: #f2f1ed;
     margin: 0 14px;
   }
+
+  /* Hub */
+  .hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+  .hub-card { background: #fff; border-radius: 12px; padding: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); border: 1px solid #e0ddd8; display: flex; flex-direction: column; gap: 8px; }
+  .hub-card-done { background: #f0f7f0; border-color: #b8d8b8; }
+  .hub-card-na { background: #f4f4f2; border-color: #d0d0cc; opacity: 0.75; }
+  .hub-card-title { font-size: 14px; font-weight: 600; color: #2c2c2c; }
+  .hub-card-fraction { font-size: 11px; color: #999; }
+  .hub-progress-bar { height: 5px; background: #ece9e4; border-radius: 3px; overflow: hidden; }
+  .hub-progress-fill { height: 100%; border-radius: 3px; transition: width 0.35s ease; }
+  .hub-card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+  .hub-na-label { font-size: 11px; color: #999; display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+  .hub-na-label input { cursor: pointer; }
+  .hub-go-btn { background: none; border: 1px solid; border-radius: 5px; padding: 5px 12px; font-size: 12px; font-family: inherit; font-weight: 500; cursor: pointer; transition: opacity 0.2s; -webkit-tap-highlight-color: transparent; }
+  .hub-go-btn:hover { opacity: 0.65; }
+
+  /* Checklist view */
+  .back-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid #d0ccc8; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-family: inherit; color: #555; cursor: pointer; margin: 12px 12px 4px; -webkit-tap-highlight-color: transparent; }
+  .back-btn:hover { border-color: #aaa; color: #333; }
+  .checklist-title { font-size: 18px; font-weight: 600; padding: 8px 12px 14px; }
+  .checklist-sections { padding: 0 12px; }
+
+  /* All row */
+  .item-all { background: #f5f3ef; border-top: 1px solid #e8e5e0; margin-top: 4px; }
+  .item-all label { font-size: 0.82rem; color: #888; font-style: italic; }
 </style>
 </head>
 <body>
@@ -311,7 +303,6 @@
   <button id="reset-btn">Reset All</button>
 </nav>
 
-<div id="tab-bar"></div>
 <div id="content"></div>
 
 <script>
@@ -529,9 +520,7 @@ const TABS = [
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 
-let activeTab = 'pretrip';
-// sectionOpen[tabId][sectionIndex] — true = open, false = collapsed
-const sectionOpen = {};
+let currentView = 'hub';
 
 function storageKey(tabId, sIdx, iIdx) {
   return `${STORAGE_PREFIX}${tabId}_${sIdx}_${iIdx}`;
@@ -555,49 +544,191 @@ function setCollapsed(tabId, sIdx, val) {
   else localStorage.removeItem(collapseKey(tabId, sIdx));
 }
 
+function getNa(tabId) {
+  return localStorage.getItem(`${STORAGE_PREFIX}na_${tabId}`) === '1';
+}
+function setNa(tabId, val) {
+  if (val) localStorage.setItem(`${STORAGE_PREFIX}na_${tabId}`, '1');
+  else localStorage.removeItem(`${STORAGE_PREFIX}na_${tabId}`);
+}
+
+// ── PROGRESS COUNTING ─────────────────────────────────────────────────────────
+
+function getTabProgress(tab) {
+  if (tab.type === 'car') {
+    let done = 0, total = 0;
+    tab.cars.forEach((car, carIdx) => {
+      car.sections.forEach((csec, sIdx) => {
+        csec.zones.forEach((zone, zIdx) => {
+          const sKey = `car_${carIdx}_${sIdx}_${zIdx}`;
+          const items = zone.items;
+          const checkedCount = items.filter((_, iIdx) =>
+            localStorage.getItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`) === '1'
+          ).length;
+          total++;
+          if (items.length > 0 && checkedCount === items.length) done++;
+        });
+      });
+    });
+    return { done, total };
+  }
+
+  let done = 0, total = 0;
+  tab.sections.forEach((sec, sIdx) => {
+    if (sec.type === 'meals') return;
+    const items = sec.items || [];
+    if (items.length === 0) return;
+    total++;
+    const checkedCount = items.filter((_, iIdx) => getChecked(tab.id, sIdx, iIdx)).length;
+    if (checkedCount === items.length) done++;
+  });
+  return { done, total };
+}
+
 // ── RENDER ───────────────────────────────────────────────────────────────────
 
-function buildTabBar() {
-  const bar = document.getElementById('tab-bar');
-  bar.innerHTML = '';
-  TABS.forEach(tab => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (tab.id === activeTab ? ' active' : '');
-    btn.textContent = tab.label;
-    btn.style.borderBottomColor = tab.id === activeTab ? tab.color : 'transparent';
-    btn.addEventListener('click', () => switchTab(tab.id));
-    bar.appendChild(btn);
-  });
-}
-
-function switchTab(id) {
-  activeTab = id;
-  buildTabBar();
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === id));
-  // scroll tab button into view
-  const btns = document.querySelectorAll('.tab-btn');
-  btns.forEach(b => { if (b.textContent === TABS.find(t => t.id === id)?.label) b.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'}); });
-}
-
-function buildContent() {
+function render() {
   const content = document.getElementById('content');
   content.innerHTML = '';
 
+  if (currentView === 'hub') {
+    content.classList.add('hub-view');
+    content.appendChild(buildHub());
+  } else {
+    content.classList.remove('hub-view');
+    const tab = TABS.find(t => t.id === currentView);
+    if (tab) content.appendChild(buildChecklistView(tab));
+  }
+}
+
+function buildHub() {
+  const grid = document.createElement('div');
+  grid.className = 'hub-grid';
+
+  // Sort: active first (preserve TABS order), done second, NA third
+  const active = [], done = [], na = [];
   TABS.forEach(tab => {
-    const panel = document.createElement('div');
-    panel.className = 'tab-panel' + (tab.id === activeTab ? ' active' : '');
-    panel.dataset.tab = tab.id;
-
-    if (tab.type === 'car') {
-      panel.appendChild(buildCarTab(tab));
+    const isNa = getNa(tab.id);
+    if (isNa) {
+      na.push(tab);
     } else {
-      tab.sections.forEach((sec, sIdx) => {
-        panel.appendChild(buildSection(tab, sec, sIdx));
-      });
+      const { done: d, total: t } = getTabProgress(tab);
+      if (t > 0 && d === t) done.push(tab);
+      else active.push(tab);
     }
-
-    content.appendChild(panel);
   });
+  const sorted = [...active, ...done, ...na];
+
+  sorted.forEach(tab => {
+    grid.appendChild(buildHubCard(tab));
+  });
+
+  return grid;
+}
+
+function buildHubCard(tab) {
+  const isNa = getNa(tab.id);
+  const { done, total } = getTabProgress(tab);
+  const allDone = total > 0 && done === total;
+
+  const card = document.createElement('div');
+  card.className = 'hub-card';
+  if (isNa) card.classList.add('hub-card-na');
+  else if (allDone) card.classList.add('hub-card-done');
+
+  // Title
+  const titleEl = document.createElement('div');
+  titleEl.className = 'hub-card-title';
+  titleEl.textContent = tab.label;
+  card.appendChild(titleEl);
+
+  // Fraction
+  const fracEl = document.createElement('div');
+  fracEl.className = 'hub-card-fraction';
+  fracEl.textContent = isNa ? 'N/A' : `${done} / ${total}`;
+  card.appendChild(fracEl);
+
+  // Progress bar
+  const barWrap = document.createElement('div');
+  barWrap.className = 'hub-progress-bar';
+  const barFill = document.createElement('div');
+  barFill.className = 'hub-progress-fill';
+  barFill.style.background = tab.color;
+  const pct = total > 0 ? (done / total) * 100 : 0;
+  barFill.style.width = isNa ? '100%' : `${pct}%`;
+  if (isNa) barFill.style.background = '#c8c8c4';
+  barWrap.appendChild(barFill);
+  card.appendChild(barWrap);
+
+  // Bottom row: N/A checkbox + Go button
+  const bottom = document.createElement('div');
+  bottom.className = 'hub-card-bottom';
+
+  const naLabel = document.createElement('label');
+  naLabel.className = 'hub-na-label';
+  const naCb = document.createElement('input');
+  naCb.type = 'checkbox';
+  naCb.checked = isNa;
+  naCb.addEventListener('change', () => {
+    setNa(tab.id, naCb.checked);
+    render();
+  });
+  naLabel.appendChild(naCb);
+  naLabel.appendChild(document.createTextNode('N/A'));
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'hub-go-btn';
+  goBtn.textContent = 'Go \u2192';
+  goBtn.style.borderColor = tab.color;
+  goBtn.style.color = tab.color;
+  goBtn.addEventListener('click', () => {
+    currentView = tab.id;
+    render();
+    window.scrollTo(0, 0);
+  });
+
+  bottom.appendChild(naLabel);
+  bottom.appendChild(goBtn);
+  card.appendChild(bottom);
+
+  return card;
+}
+
+function buildChecklistView(tab) {
+  const frag = document.createDocumentFragment();
+
+  // Back button
+  const backBtn = document.createElement('button');
+  backBtn.className = 'back-btn';
+  backBtn.textContent = '\u2190 Hub';
+  backBtn.addEventListener('click', () => {
+    currentView = 'hub';
+    render();
+    window.scrollTo(0, 0);
+  });
+  frag.appendChild(backBtn);
+
+  // Title
+  const titleEl = document.createElement('h2');
+  titleEl.className = 'checklist-title';
+  titleEl.textContent = tab.label;
+  titleEl.style.color = tab.color;
+  frag.appendChild(titleEl);
+
+  // Sections wrapper
+  const sectionsWrap = document.createElement('div');
+  sectionsWrap.className = 'checklist-sections';
+
+  if (tab.type === 'car') {
+    sectionsWrap.appendChild(buildCarTab(tab));
+  } else {
+    tab.sections.forEach((sec, sIdx) => {
+      sectionsWrap.appendChild(buildSection(tab, sec, sIdx));
+    });
+  }
+
+  frag.appendChild(sectionsWrap);
+  return frag;
 }
 
 function buildSection(tab, sec, sIdx) {
@@ -611,14 +742,7 @@ function buildSection(tab, sec, sIdx) {
   const checkedCount = items.filter((_, iIdx) => getChecked(tab.id, sIdx, iIdx)).length;
   const allDone = items.length > 0 && checkedCount === items.length;
 
-  // determine open/collapsed
-  // auto-collapse if all done (unless manually forced open)
   const manualCollapse = getCollapsed(tab.id, sIdx);
-  // if allDone -> collapse unless user explicitly opened it
-  // We track this with a separate "user_open" key but keep it simple:
-  // collapsed if allDone OR manualCollapse; unless allDone and user un-collapsed
-
-  // Simple approach: collapsed state = manualCollapse; when allDone we additionally collapse
   let isCollapsed = allDone || manualCollapse;
 
   const wrapper = document.createElement('div');
@@ -668,10 +792,13 @@ function buildSection(tab, sec, sIdx) {
   const ul = document.createElement('ul');
   ul.className = 'item-list';
 
+  const liEls = [];
+
   items.forEach((item, iIdx) => {
     const li = document.createElement('li');
     const checked = getChecked(tab.id, sIdx, iIdx);
     if (checked) li.classList.add('checked');
+    liEls.push(li);
 
     const id = `${tab.id}-${sIdx}-${iIdx}`;
     const cb = document.createElement('input');
@@ -694,6 +821,45 @@ function buildSection(tab, sec, sIdx) {
     ul.appendChild(li);
   });
 
+  // "All" row
+  const allLi = document.createElement('li');
+  allLi.className = 'item-all';
+
+  const allId = `${tab.id}-${sIdx}-all`;
+  const allCb = document.createElement('input');
+  allCb.type = 'checkbox';
+  allCb.id = allId;
+
+  // Set initial state
+  if (checkedCount === items.length && items.length > 0) {
+    allCb.checked = true;
+  } else if (checkedCount > 0) {
+    allCb.indeterminate = true;
+  } else {
+    allCb.checked = false;
+  }
+
+  const allLbl = document.createElement('label');
+  allLbl.htmlFor = allId;
+  allLbl.textContent = 'All';
+
+  allCb.addEventListener('change', () => {
+    const val = allCb.checked;
+    items.forEach((_, iIdx) => {
+      setChecked(tab.id, sIdx, iIdx, val);
+      liEls[iIdx].classList.toggle('checked', val);
+      liEls[iIdx].querySelector('input[type="checkbox"]').checked = val;
+    });
+    rebuildSectionState(wrapper, tab, sec, sIdx);
+  });
+
+  allLi.appendChild(allCb);
+  allLi.appendChild(allLbl);
+  ul.appendChild(allLi);
+
+  // Store reference for rebuildSectionState
+  wrapper._allCb = allCb;
+
   body.appendChild(ul);
   wrapper.appendChild(header);
   wrapper.appendChild(body);
@@ -704,6 +870,7 @@ function rebuildSectionState(wrapper, tab, sec, sIdx) {
   const items = sec.items || [];
   const checkedCount = items.filter((_, iIdx) => getChecked(tab.id, sIdx, iIdx)).length;
   const allDone = items.length > 0 && checkedCount === items.length;
+  const someChecked = checkedCount > 0 && !allDone;
 
   // update progress
   wrapper.querySelector('.section-progress').textContent = `${checkedCount} / ${items.length}`;
@@ -711,10 +878,23 @@ function rebuildSectionState(wrapper, tab, sec, sIdx) {
   wrapper.classList.toggle('all-done', allDone);
 
   if (allDone) {
-    // auto-collapse
     wrapper.classList.add('collapsed');
-    // clear manual open override
     setCollapsed(tab.id, sIdx, false);
+  }
+
+  // Update "All" checkbox state
+  if (wrapper._allCb) {
+    const allCb = wrapper._allCb;
+    if (allDone) {
+      allCb.checked = true;
+      allCb.indeterminate = false;
+    } else if (someChecked) {
+      allCb.indeterminate = true;
+      allCb.checked = false;
+    } else {
+      allCb.checked = false;
+      allCb.indeterminate = false;
+    }
   }
 }
 
@@ -848,10 +1028,13 @@ function buildCarTab(tab) {
         const ul = document.createElement('ul');
         ul.className = 'item-list';
 
+        const liEls = [];
+
         items.forEach((item, iIdx) => {
           const li = document.createElement('li');
           const checked = localStorage.getItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`) === '1';
           if (checked) li.classList.add('checked');
+          liEls.push(li);
 
           const id = `car-${carIdx}-${sIdx}-${zIdx}-${iIdx}`;
           const cb = document.createElement('input');
@@ -874,12 +1057,67 @@ function buildCarTab(tab) {
             const newAllDone = items.length > 0 && newCount === items.length;
             wrapper.classList.toggle('all-done', newAllDone);
             if (newAllDone) wrapper.classList.add('collapsed');
+            // Update "All" checkbox
+            if (wrapper._allCb) {
+              const allCb = wrapper._allCb;
+              if (newAllDone) {
+                allCb.checked = true;
+                allCb.indeterminate = false;
+              } else if (newCount > 0) {
+                allCb.indeterminate = true;
+                allCb.checked = false;
+              } else {
+                allCb.checked = false;
+                allCb.indeterminate = false;
+              }
+            }
           });
 
           li.appendChild(cb);
           li.appendChild(lbl);
           ul.appendChild(li);
         });
+
+        // "All" row for car zones
+        const allLi = document.createElement('li');
+        allLi.className = 'item-all';
+        const allId = `car-${carIdx}-${sIdx}-${zIdx}-all`;
+        const allCb = document.createElement('input');
+        allCb.type = 'checkbox';
+        allCb.id = allId;
+
+        if (checkedCount === items.length && items.length > 0) {
+          allCb.checked = true;
+        } else if (checkedCount > 0) {
+          allCb.indeterminate = true;
+        } else {
+          allCb.checked = false;
+        }
+
+        const allLbl = document.createElement('label');
+        allLbl.htmlFor = allId;
+        allLbl.textContent = 'All';
+
+        allCb.addEventListener('change', () => {
+          const val = allCb.checked;
+          items.forEach((_, iIdx) => {
+            if (val) localStorage.setItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`, '1');
+            else localStorage.removeItem(`${STORAGE_PREFIX}${sKey}_${iIdx}`);
+            liEls[iIdx].classList.toggle('checked', val);
+            liEls[iIdx].querySelector('input[type="checkbox"]').checked = val;
+          });
+          const newCount = val ? items.length : 0;
+          progress.textContent = `${newCount} / ${items.length}`;
+          const newAllDone = val && items.length > 0;
+          wrapper.classList.toggle('all-done', newAllDone);
+          if (newAllDone) wrapper.classList.add('collapsed');
+          allCb.indeterminate = false;
+        });
+
+        allLi.appendChild(allCb);
+        allLi.appendChild(allLbl);
+        ul.appendChild(allLi);
+        wrapper._allCb = allCb;
 
         body.appendChild(ul);
         wrapper.appendChild(header);
@@ -895,20 +1133,18 @@ function buildCarTab(tab) {
 // ── RESET ─────────────────────────────────────────────────────────────────────
 
 document.getElementById('reset-btn').addEventListener('click', () => {
-  // clear all app keys
   const keysToRemove = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && k.startsWith(STORAGE_PREFIX)) keysToRemove.push(k);
   }
   keysToRemove.forEach(k => localStorage.removeItem(k));
-  buildContent();
+  render();
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 
-buildTabBar();
-buildContent();
+render();
 </script>
 </body>
 </html>
